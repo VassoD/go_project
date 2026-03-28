@@ -47,9 +47,13 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if period == "" {
+		http.Error(w, `missing query param: period`, http.StatusBadRequest)
+		return
+	}
 	validPeriods := map[string]bool{"daily": true, "weekly": true, "monthly": true}
 	if !validPeriods[period] {
-		http.Error(w, `period must be "daily", "weekly", or "monthly"`, http.StatusBadRequest)
+		http.Error(w, `invalid period: must be "daily", "weekly", or "monthly"`, http.StatusBadRequest)
 		return
 	}
 
