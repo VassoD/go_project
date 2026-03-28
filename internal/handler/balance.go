@@ -1,5 +1,10 @@
 package handler
 
+// Business assumption:
+// In order to avoid timezone conversion, we assume that all trip timestamps are already expressed in France local time
+// and that the company with the drivers operates in France only.
+// Therefore, no timezone conversion is applied when computing daily, weekly, and monthly balances.
+
 import (
 	"encoding/json"
 	"net/http"
@@ -9,7 +14,6 @@ import (
 	"vtc-service/internal/store"
 )
 
-// we consider france as the timezone.
 var france = func() *time.Location {
 	loc, err := time.LoadLocation("Europe/Paris")
 	if err != nil {
@@ -17,6 +21,11 @@ var france = func() *time.Location {
 	}
 	return loc
 }()
+
+// currentTime is overridable in tests so period window checks stay deterministic.
+var currentTime = func() time.Time {
+	return time.Now().In(france)
+}
 
 // BalanceHandler handles GET /balances
 type BalanceHandler struct {
@@ -55,7 +64,7 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // sumTripsForPeriod sums amounts of trips within [periodStart, now].
 // excludes future-dated trips that may have been ingested.
 func sumTripsForPeriod(trips []model.Trip, period string) float64 {
-	now := time.Now().In(france)
+	now := currentTime()
 	start := periodStart(now, period)
 
 	var total float64
