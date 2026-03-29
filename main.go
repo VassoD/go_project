@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	_ "time/tzdata"
 	"vtc-service/internal/handler"
 	"vtc-service/internal/store"
 )
