@@ -1,9 +1,14 @@
 package handler
 
 // Business assumption:
-// In order to avoid timezone conversion, we assume that all trip timestamps are already expressed in France local time
-// and that the company with the drivers operates in France only.
-// Therefore, no timezone conversion is applied when computing daily, weekly, and monthly balances.
+// The service assumes drivers operate in France only. Timestamps with an explicit timezone offset are
+// stored as-is; naive timestamps (no offset) are interpreted as Europe/Paris at ingest.
+// All period boundaries (daily, weekly, monthly) are computed in Europe/Paris.
+//
+// If the service were to expand to multiple countries, the right approach would be:
+// - store all timestamps in UTC at ingest (add .UTC() in parseTimestamp)
+// - attach a timezone or country to each driver
+// - convert to the driver's local timezone only at query time when computing period boundaries
 
 import (
 	"encoding/json"
