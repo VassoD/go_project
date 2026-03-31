@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -39,19 +40,27 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var allTrips []model.Trip
-	var parseErrors []string
+	var warnings []string
 
 	for _, fileHeader := range files {
-		trips, err := parseFile(fileHeader)
+		trips, fileWarnings, err := parseFile(fileHeader)
+		for _, warning := range fileWarnings {
+			warnings = append(warnings, fmt.Sprintf("%s: %s", fileHeader.Filename, warning))
+		}
 		if err != nil {
-			parseErrors = append(parseErrors, fmt.Sprintf("%s: %v", fileHeader.Filename, err))
-			continue
+			warnings = append(warnings, fmt.Sprintf("%s: %v", fileHeader.Filename, err))
 		}
 		allTrips = append(allTrips, trips...)
 	}
 
-	if len(parseErrors) > 0 && len(allTrips) == 0 {
-		http.Error(w, "all files failed to parse:\n"+strings.Join(parseErrors, "\n"), http.StatusBadRequest)
+	if len(allTrips) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ingested": 0,
+			"total":    h.Store.Count(),
+			"warnings": warnings,
+		})
 		return
 	}
 
@@ -64,17 +73,17 @@ func (h *IngestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"ingested": len(allTrips),
 		"total":    h.Store.Count(),
 	}
-	if len(parseErrors) > 0 {
-		response["warnings"] = parseErrors
+	if len(warnings) > 0 {
+		response["warnings"] = warnings
 	}
 	_ = json.NewEncoder(w).Encode(response)
 }
 
 // parseFile opens and delegates to the right parser based on file extension.
-func parseFile(fileHeader *multipart.FileHeader) ([]model.Trip, error) {
+func parseFile(fileHeader *multipart.FileHeader) ([]model.Trip, []string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		return nil, fmt.Errorf("cannot open: %w", err)
+		return nil, nil, fmt.Errorf("cannot open: %w", err)
 	}
 	defer file.Close()
 
@@ -85,61 +94,84 @@ func parseFile(fileHeader *multipart.FileHeader) ([]model.Trip, error) {
 	case strings.HasSuffix(name, ".csv"):
 		return parseCSV(file)
 	default:
-		return nil, fmt.Errorf("unsupported format (use .json or .csv)")
+		return nil, nil, fmt.Errorf("unsupported format (use .json or .csv)")
 	}
 }
 
 // parseJSON decodes a JSON array of trips into a raw intermediate struct (Timestamp as string)
 // so timestamp parsing and validation go through parseTimestamp, same as CSV.
-func parseJSON(r io.Reader) ([]model.Trip, error) {
-	var raw []struct {
-		DriverID  string  `json:"driver_id"`
-		Timestamp string  `json:"timestamp"`
-		Amount    float64 `json:"amount"`
-	}
+func parseJSON(r io.Reader) ([]model.Trip, []string, error) {
+	var raw []json.RawMessage
 	dec := json.NewDecoder(r)
 	if err := dec.Decode(&raw); err != nil {
-		return nil, fmt.Errorf("invalid JSON: %w", err)
+		return nil, nil, fmt.Errorf("invalid JSON: %w", err)
 	}
 	if dec.More() {
-		return nil, fmt.Errorf("invalid JSON: unexpected content after array")
+		return nil, nil, fmt.Errorf("invalid JSON: unexpected content after array")
 	}
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("JSON file contains no trips")
+		return nil, nil, fmt.Errorf("JSON file contains no trips")
 	}
 
 	trips := make([]model.Trip, 0, len(raw))
-	for i, record := range raw {
-		if record.DriverID == "" {
-			return nil, fmt.Errorf("record %d: driver_id cannot be empty", i+1)
+	var warnings []string
+	for i, blob := range raw {
+		var record struct {
+			DriverID  string   `json:"driver_id"`
+			Timestamp string   `json:"timestamp"`
+			Amount    *float64 `json:"amount"`
 		}
-		if record.Amount < 0 {
-			return nil, fmt.Errorf("record %d: amount cannot be negative", i+1)
+
+		recordDec := json.NewDecoder(bytes.NewReader(blob))
+		recordDec.DisallowUnknownFields()
+		if err := recordDec.Decode(&record); err != nil {
+			warnings = append(warnings, fmt.Sprintf("record %d: invalid JSON object: %v", i+1, err))
+			continue
+		}
+
+		if record.DriverID == "" {
+			warnings = append(warnings, fmt.Sprintf("record %d: driver_id cannot be empty", i+1))
+			continue
+		}
+		if record.Amount == nil {
+			warnings = append(warnings, fmt.Sprintf("record %d: amount is missing", i+1))
+			continue
+		}
+		if *record.Amount < 0 {
+			warnings = append(warnings, fmt.Sprintf("record %d: amount cannot be negative", i+1))
+			continue
 		}
 		if record.Timestamp == "" {
-			return nil, fmt.Errorf("record %d: timestamp is missing", i+1)
+			warnings = append(warnings, fmt.Sprintf("record %d: timestamp is missing", i+1))
+			continue
 		}
 		timestamp, err := parseTimestamp(record.Timestamp)
 		if err != nil {
-			return nil, fmt.Errorf("record %d: invalid timestamp %q", i+1, record.Timestamp)
+			warnings = append(warnings, fmt.Sprintf("record %d: invalid timestamp %q", i+1, record.Timestamp))
+			continue
 		}
 		trips = append(trips, model.Trip{
 			DriverID:  record.DriverID,
 			Timestamp: timestamp,
-			Amount:    record.Amount,
+			Amount:    *record.Amount,
 		})
 	}
-	return trips, nil
+
+	if len(trips) == 0 {
+		return nil, warnings, fmt.Errorf("JSON file contains no valid trips")
+	}
+	return trips, warnings, nil
 }
 
 // parseCSV parses a CSV file with headers: driver_id, timestamp, amount.
-func parseCSV(r io.Reader) ([]model.Trip, error) {
+func parseCSV(r io.Reader) ([]model.Trip, []string, error) {
 	reader := csv.NewReader(r)
+	reader.FieldsPerRecord = -1
 
 	// Read header row
 	headers, err := reader.Read()
 	if err != nil {
-		return nil, fmt.Errorf("cannot read CSV header: %w", err)
+		return nil, nil, fmt.Errorf("cannot read CSV header: %w", err)
 	}
 
 	// Build a map of column name -> index for flexible column ordering.
@@ -151,11 +183,13 @@ func parseCSV(r io.Reader) ([]model.Trip, error) {
 	required := []string{"driver_id", "timestamp", "amount"}
 	for _, col := range required {
 		if _, ok := colIndex[col]; !ok {
-			return nil, fmt.Errorf("missing required column: %s", col)
+			return nil, nil, fmt.Errorf("missing required column: %s", col)
 		}
 	}
 
 	var trips []model.Trip
+	var warnings []string
+	seenDataRow := false
 	lineNum := 1
 	for {
 		record, err := reader.Read()
@@ -164,25 +198,54 @@ func parseCSV(r io.Reader) ([]model.Trip, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", lineNum, err)
+			warnings = append(warnings, fmt.Sprintf("line %d: %v", lineNum, err))
+			continue
+		}
+		if len(record) == 1 && strings.TrimSpace(record[0]) == "" {
+			continue
+		}
+		seenDataRow = true
+
+		driverIdx := colIndex["driver_id"]
+		timestampIdx := colIndex["timestamp"]
+		amountIdx := colIndex["amount"]
+		if driverIdx >= len(record) || timestampIdx >= len(record) || amountIdx >= len(record) {
+			warnings = append(warnings, fmt.Sprintf("line %d: missing one or more required values", lineNum))
+			continue
 		}
 
-		amount, err := strconv.ParseFloat(strings.TrimSpace(record[colIndex["amount"]]), 64)
+		driverID := strings.TrimSpace(record[driverIdx])
+		if driverID == "" {
+			warnings = append(warnings, fmt.Sprintf("line %d: driver_id cannot be empty", lineNum))
+			continue
+		}
+
+		rawAmount := strings.TrimSpace(record[amountIdx])
+		if rawAmount == "" {
+			warnings = append(warnings, fmt.Sprintf("line %d: amount is missing", lineNum))
+			continue
+		}
+
+		amount, err := strconv.ParseFloat(rawAmount, 64)
 		if err != nil {
-			return nil, fmt.Errorf("line %d: invalid amount %q", lineNum, record[colIndex["amount"]])
+			warnings = append(warnings, fmt.Sprintf("line %d: invalid amount %q", lineNum, record[amountIdx]))
+			continue
 		}
 		if amount < 0 {
-			return nil, fmt.Errorf("line %d: amount cannot be negative", lineNum)
+			warnings = append(warnings, fmt.Sprintf("line %d: amount cannot be negative", lineNum))
+			continue
 		}
 
-		timestamp, err := parseTimestamp(strings.TrimSpace(record[colIndex["timestamp"]]))
+		rawTimestamp := strings.TrimSpace(record[timestampIdx])
+		if rawTimestamp == "" {
+			warnings = append(warnings, fmt.Sprintf("line %d: timestamp is missing", lineNum))
+			continue
+		}
+
+		timestamp, err := parseTimestamp(rawTimestamp)
 		if err != nil {
-			return nil, fmt.Errorf("line %d: invalid timestamp %q: %w", lineNum, record[colIndex["timestamp"]], err)
-		}
-
-		driverID := strings.TrimSpace(record[colIndex["driver_id"]])
-		if driverID == "" {
-			return nil, fmt.Errorf("line %d: driver_id cannot be empty", lineNum)
+			warnings = append(warnings, fmt.Sprintf("line %d: invalid timestamp %q", lineNum, record[timestampIdx]))
+			continue
 		}
 
 		trips = append(trips, model.Trip{
@@ -192,10 +255,13 @@ func parseCSV(r io.Reader) ([]model.Trip, error) {
 		})
 	}
 
-	if len(trips) == 0 {
-		return nil, fmt.Errorf("CSV file contains no data rows")
+	if !seenDataRow {
+		return nil, nil, fmt.Errorf("CSV file contains no data rows")
 	}
-	return trips, nil
+	if len(trips) == 0 {
+		return nil, warnings, fmt.Errorf("CSV file contains no valid trips")
+	}
+	return trips, warnings, nil
 }
 
 // parseTimestamp tries multiple common timestamp formats since different platforms (Uber, Bolt, etc.)
