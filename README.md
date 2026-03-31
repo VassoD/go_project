@@ -127,7 +127,7 @@ The test specifies three deductions (15% commission, 20% VAT, 20% Urssaf) but do
 
 Each intermediate value is rounded to 2 decimal places before being used in the next step, so all fields in the response are self-consistent (`net_payout` always equals `net_after_commission - vat - urssaf` as displayed).
 
-**Note on floating-point arithmetic**: amounts are stored and computed as `float64`. This is acceptable here because typical fare values are small enough to be represented exactly as IEEE 754 doubles, and the `round2` helper (`math.Round(x*100)/100`) eliminates the sub-cent rounding noise that `float64` multiplication can introduce (e.g. `85 × 0.20 = 17.000000000000004`). In a production system, monetary values should use an arbitrary-precision decimal library such as `shopspring/decimal` to avoid accumulated error across thousands of transactions.
+**Note on floating-point arithmetic**: amounts are stored and computed as `float64`. This is acceptable for this exercise because the code rounds values to 2 decimals at each step. In a production system, monetary values should use a decimal type to avoid floating-point precision issues.
 
 ### Test strategy
 
