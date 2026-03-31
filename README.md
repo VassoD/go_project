@@ -24,10 +24,23 @@ Accepted trip schema:
 
 The original exercise statement mixes French business wording (`montant`) with the API description. This implementation uses English field names consistently across JSON, CSV, and API responses, so `montant` is represented as `amount` in input files.
 
+Ingestion is best-effort:
+- valid rows are stored even if some rows in the same file are invalid
+- invalid rows are skipped and returned in the `warnings` field
+- the endpoint returns `400` only when no valid trip was ingested at all
+
 ```bash
 curl -X POST http://localhost:8080/ingest \
   -F "files=@data/trips_uber.json" \
   -F "files=@data/trips_bolt.csv"
+```
+
+The files `data/trips_uber.json`, `data/trips_bolt.csv`, and `data/trips_heetch.csv` are valid happy-path examples.
+To demonstrate partial ingestion with warnings, use `data/trips_corrupted.csv`, which intentionally mixes valid and invalid rows:
+
+```bash
+curl -X POST http://localhost:8080/ingest \
+  -F "files=@data/trips_corrupted.csv"
 ```
 
 ### GET /balances
