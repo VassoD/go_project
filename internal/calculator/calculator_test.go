@@ -38,7 +38,7 @@ func TestCalculate(t *testing.T) {
 			wantComm:   7.5,  // 15% of 50
 			wantVAT:    8.5,  // 20% of 42.5
 			wantUrssaf: 8.5,  // 20% of 42.5
-			wantNet:    25.5, // 42.5 - 8.5 -> 8.5
+			wantNet:    25.5, // 42.5 - 8.5 - 8.5
 		},
 		{
 			name:       "33.33 euros (driver-5, fractional rounding)",
