@@ -58,7 +58,8 @@ Parameters:
 - `driver_id` (required): the driver's ID
 - `period` (required): `daily`, `weekly`, or `monthly`
 
-If the driver has no trips in the requested period — or the `driver_id` is unknown — the endpoint returns `200` with all amounts set to `0`. Both cases are indistinguishable by design: a zero payout means nothing to pay out, regardless of whether the driver exists.
+If the `driver_id` has never been ingested, the endpoint returns `404`.
+If the driver exists but has no trips in the requested period, the endpoint returns `200` with all amounts set to `0`.
 
 ### GET /health
 
@@ -120,7 +121,7 @@ The test specifies three deductions (15% commission, 20% VAT, 20% Urssaf) but do
 
 - **Commission** = `gross x 15%` — deducted first, it's the platform's cut.
 - **Net after commission** = `gross - commission` — the base for the remaining deductions.
-- **VAT** = `net x 20%` — applied to the net after commission.
+- **VAT** = `net x 20%` — applied to the net after commission. We assume the platform collects TVA from the client on the driver's behalf and deducts it before paying the driver.
 - **Urssaf** = `net x 20%` — applied to the same base, independently.
 - **Net payout** = `net - VAT - Urssaf`
 
