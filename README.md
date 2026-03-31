@@ -132,3 +132,15 @@ Each intermediate value is rounded to 2 decimal places before being used in the 
 - **Unit tests** (`internal/calculator/`): pure function tests with table-driven cases covering normal values, edge cases (zero), and boundary values.
 - **Integration tests** (`internal/handler/`): test full HTTP handler behavior using `httptest` - no real server needed, no mocks of the store. These verify parsing, routing, validation, and response format together.
 - **Period windowing** (`internal/handler/period_test.go`): the `currentTime` function is overridable, allowing deterministic tests for daily, weekly, and monthly boundaries, including edge cases like leap years and short months — without a clock interface.
+
+### Deployment
+
+The service is packaged as a Docker image using a multi-stage build:
+
+1. **Build stage** (`golang:1.22-alpine`): compiles a statically linked binary with CGO disabled.
+2. **Final stage** (`scratch`): contains only the binary, producing a minimal image with no OS overhead.
+
+```bash
+make docker-build   # builds the image tagged as vtc-service
+make docker-run     # runs the container, exposing port 8080
+```
