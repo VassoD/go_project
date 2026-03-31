@@ -67,9 +67,6 @@ func TestBalanceInvalidPeriod(t *testing.T) {
 }
 
 func TestBalanceUnknownDriver(t *testing.T) {
-	fixedNow := parseTime("2026-03-28 14:00:00")
-	withCurrentTime(t, fixedNow)
-
 	s := store.New()
 	h := &BalanceHandler{Store: s}
 
@@ -77,20 +74,37 @@ func TestBalanceUnknownDriver(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unknown driver, got %d", rec.Code)
+	}
+}
+
+func TestBalanceKnownDriverNoTripsInPeriod(t *testing.T) {
+	// Driver has trips, but none fall within the requested period window.
+	// Should return 200 with all amounts = 0 (not 404).
+	fixedNow := parseTime("2026-03-28 14:00:00")
+	withCurrentTime(t, fixedNow)
+
+	s := store.New()
+	s.AddTrips([]model.Trip{
+		{DriverID: "d1", Timestamp: parseTime("2026-03-27 10:00:00"), Amount: 50.0}, // yesterday – outside daily window
+	})
+
+	h := &BalanceHandler{Store: s}
+	req := httptest.NewRequest(http.MethodGet, "/balances?driver_id=d1&period=daily", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 for known driver with no trips in period, got %d", rec.Code)
 	}
 
 	var balance map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&balance); err != nil {
 		t.Fatal("invalid JSON response:", err)
 	}
-
-	if balance["gross_amount"] != 0.0 {
-		t.Errorf("expected gross_amount=0.0 for unknown driver, got %v", balance["gross_amount"])
-	}
 	if balance["net_payout"] != 0.0 {
-		t.Errorf("expected net_payout=0.0 for unknown driver, got %v", balance["net_payout"])
+		t.Errorf("expected net_payout=0.0, got %v", balance["net_payout"])
 	}
 }
 
