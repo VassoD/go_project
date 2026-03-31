@@ -63,6 +63,11 @@ func (h *BalanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	trips := h.Store.GetTrips(driverID)
+	if len(trips) == 0 {
+		http.Error(w, "driver not found", http.StatusNotFound)
+		return
+	}
+
 	gross := sumTripsForPeriod(trips, period)
 	balance := calculator.Calculate(driverID, period, gross)
 
