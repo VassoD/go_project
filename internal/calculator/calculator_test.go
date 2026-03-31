@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// TestCalculate uses Go's built-in "table-driven test" pattern.
-// Instead of writing one test function per case, we declare a slice of test cases and loop over them.
 func TestCalculate(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -51,11 +49,9 @@ func TestCalculate(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		// t.Run creates a sub-test with a name
 		t.Run(tc.name, func(t *testing.T) {
 			result := Calculate("driver-1", "daily", tc.gross)
 
-			// Go has no assert library in stdlib, so we check manually and call t.Errorf.
 			if result.Commission != tc.wantComm {
 				t.Errorf("Commission: got %.2f, want %.2f", result.Commission, tc.wantComm)
 			}
