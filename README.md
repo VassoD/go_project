@@ -17,6 +17,13 @@ The service starts on `http://localhost:8080`.
 
 Upload one or more JSON or CSV files as multipart form data.
 
+Accepted trip schema:
+- `driver_id`: driver identifier
+- `timestamp`: trip date/time
+- `amount`: trip amount in euros
+
+The original exercise statement mixes French business wording (`montant`) with the API description. This implementation uses English field names consistently across JSON, CSV, and API responses, so `montant` is represented as `amount` in input files.
+
 ```bash
 curl -X POST http://localhost:8080/ingest \
   -F "files=@data/trips_uber.json" \
