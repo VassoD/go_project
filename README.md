@@ -32,8 +32,11 @@ Ingestion is best-effort:
 ```bash
 curl -X POST http://localhost:8080/ingest \
   -F "files=@data/trips_uber.json" \
-  -F "files=@data/trips_bolt.csv"
+  -F "files=@data/trips_bolt.csv" \
+  -F "files=@data/trips_heetch.csv"
 ```
+
+> **Note on re-ingestion**: there is no deduplication — calling `/ingest` twice with the same file stores the trips twice.
 
 The files `data/trips_uber.json`, `data/trips_bolt.csv`, and `data/trips_heetch.csv` are valid happy-path examples.
 To demonstrate partial ingestion with warnings, use `data/trips_corrupted.csv`, which intentionally mixes valid and invalid rows:
@@ -48,12 +51,14 @@ curl -X POST http://localhost:8080/ingest \
 Returns the net payout for a driver over a period.
 
 ```bash
-curl "http://localhost:8080/balances?driver_id=driver-1&period=weekly"
+curl "http://localhost:8080/balances?driver_id=driver-1&period=monthly"
 ```
 
 Parameters:
 - `driver_id` (required): the driver's ID
 - `period` (required): `daily`, `weekly`, or `monthly`
+
+If the driver has no trips in the requested period — or the `driver_id` is unknown — the endpoint returns `200` with all amounts set to `0`. Both cases are indistinguishable by design: a zero payout means nothing to pay out, regardless of whether the driver exists.
 
 ### GET /health
 
