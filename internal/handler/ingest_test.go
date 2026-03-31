@@ -145,6 +145,10 @@ func TestIngestJSON_InvalidRecords(t *testing.T) {
 			data: `[{"timestamp":"2026-03-28T10:00:00Z","amount":50.0}]`,
 		},
 		{
+			name: "missing amount field",
+			data: `[{"driver_id":"d1","timestamp":"2026-03-28T10:00:00Z"}]`,
+		},
+		{
 			name: "trailing content after array",
 			data: `[{"driver_id":"d1","timestamp":"2026-03-28T10:00:00Z","amount":50.0}] garbage`,
 		},
@@ -169,6 +173,87 @@ func TestIngestJSON_InvalidRecords(t *testing.T) {
 				t.Errorf("expected 0 trips stored, got %d", s.Count())
 			}
 		})
+	}
+}
+
+func TestIngestJSON_PartialSuccessWithinFile(t *testing.T) {
+	s := store.New()
+	h := &IngestHandler{Store: s}
+
+	jsonData := `[
+		{"driver_id":"d1","timestamp":"2026-03-28T10:00:00Z","amount":50.0},
+		{"driver_id":"d2","timestamp":"2026-03-28T11:00:00Z"},
+		{"driver_id":"d3","timestamp":"not-a-date","amount":12.0}
+	]`
+
+	body, contentType := makeMultipartBody(t, "trips.json", []byte(jsonData))
+	req := httptest.NewRequest(http.MethodPost, "/ingest", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal("response is not valid JSON:", err)
+	}
+
+	if got := resp["ingested"]; got != float64(1) {
+		t.Fatalf("expected ingested=1, got %v", got)
+	}
+	if s.Count() != 1 {
+		t.Fatalf("expected 1 trip in store, got %d", s.Count())
+	}
+
+	trips := s.GetTrips("d1")
+	if len(trips) != 1 {
+		t.Fatalf("expected 1 valid trip for d1, got %d", len(trips))
+	}
+	if trips[0].Amount != 50.0 {
+		t.Fatalf("expected valid trip amount to stay 50.0, got %.2f", trips[0].Amount)
+	}
+	if _, hasWarnings := resp["warnings"]; !hasWarnings {
+		t.Fatal("expected warnings for rejected JSON records")
+	}
+}
+
+func TestIngestCSV_PartialSuccessWithinFile(t *testing.T) {
+	s := store.New()
+	h := &IngestHandler{Store: s}
+
+	csvData := "driver_id,timestamp,amount\n" +
+		"d1,2026-03-28T10:00:00Z,50.0\n" +
+		"d2,2026-03-28T11:00:00Z,\n" +
+		"d3,not-a-date,12.0\n"
+
+	body, contentType := makeMultipartBody(t, "trips.csv", []byte(csvData))
+	req := httptest.NewRequest(http.MethodPost, "/ingest", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal("response is not valid JSON:", err)
+	}
+
+	if got := resp["ingested"]; got != float64(1) {
+		t.Fatalf("expected ingested=1, got %v", got)
+	}
+	if s.Count() != 1 {
+		t.Fatalf("expected 1 trip in store, got %d", s.Count())
+	}
+	if _, hasWarnings := resp["warnings"]; !hasWarnings {
+		t.Fatal("expected warnings for rejected CSV rows")
 	}
 }
 
