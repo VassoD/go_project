@@ -1,2 +1,5 @@
 .DS_Store
 .gocache
+*.out
+vtc-service
+
